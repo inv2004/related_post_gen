@@ -7,16 +7,16 @@ type
   Post = ref object
     `"_id"`: string
     title: string
-    tags : seq[string]
+    tags: seq[string]
 
   RelatedPosts = ref object
     `"_id"`: string
-    tags : seq[string]
-    related : seq[Post]
+    tags: seq[string]
+    related: seq[Post]
 
 const
-    input = "../posts.json"
-    output = "../related_posts_nim.json"
+  input = "../posts.json"
+  output = "../related_posts_nim.json"
 
 func hash(x: string): Hash =
   cast[Hash](XXH3_64bits(x))
@@ -38,7 +38,8 @@ func genTagMap(posts: seq[Post]): Table[string, seq[int]] =
       do:
         result[tag] = @[i]
 
-func countTaggedPost(taggedPostCount: var seq[uint8], i: int, post: Post, tagMap: Table[string, seq[int]]) =
+func countTaggedPost(taggedPostCount: var seq[uint8], i: int, post: Post,
+    tagMap: Table[string, seq[int]]) =
   for tag in post.tags:
     for otherIDX in tagMap[tag]:
       inc(taggedPostCount[otherIDX])
