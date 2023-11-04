@@ -1,7 +1,9 @@
 switch("mm", "arc")
+switch("cc", "clang")
 switch("passC", "-s -flto=auto")
 switch("passL", "-s -flto=auto")
 switch("threads", "off")
+switch("overflowChecks", "off")
 
 when defined(profileGen):
   echo "Build with profileGen"

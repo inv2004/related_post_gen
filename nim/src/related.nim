@@ -1,104 +1,69 @@
-import std/[hashes, monotimes, tables, times]
+import std/[hashes, monotimes, times, strformat]
 import pkg/[jsony, xxhash]
+import fixedtable
 
 type
   Post = ref object
     `"_id"`: string
     title: string
     tags : seq[string]
-
-  RelatedPosts = object
-    `"_id"`: string
-    tags : ptr seq[string]
-    related: array[5, ptr Post]
+    top5: array[5, tuple[idx: int, cnt: uint8]]
 
 const
   input = "../posts.json"
   output = "../related_posts_nim.json"
 
-func hash(x: string): Hash {.inline, used.} =
+let posts = input.readFile.fromJson(seq[Post])
+
+func hash(x: string): Hash {.inline.} =
   cast[Hash](XXH3_64bits(x))
 
-func `[]`(t: Table[string, seq[int]], key: string): lent seq[int] =
-  tables.`[]`(t.addr[], key)
-
-proc dumpHook(s: var string, v: ptr) {.inline, used.} =
-  if v == nil:
-    s.add("null")
-  else:
-    s.dumpHook(v[])
-
-func genTagMap(posts: seq[Post]): Table[string, seq[int]] =
-  result = initTable[string, seq[int]](100)
-  for i, post in posts:
-    for tag in post.tags:
-      result.withValue(tag, val):
-        val[].add i
-      do:
-        result[tag] = @[i]
-
-proc readPosts(path: string): seq[Post] =
-  path.readFile.fromJson(seq[Post])
-
-proc writePosts(path: string, posts: seq[RelatedPosts]) =
-  path.writeFile(posts.toJson)
-
-{.push inline.}
-
-proc countTaggedPost(
-    taggedPostCount: var seq[uint8],
-    posts: seq[Post],
-    tagMap: Table[string, seq[int]],
-    i: int) =
-  for tag in posts[i].tags:
-    try:
-      for relatedIDX in tagMap[tag]:
-        inc(taggedPostCount[relatedIDX])
-    except KeyError as e:
-      raise (ref Defect)(msg: e.msg)
-  taggedPostCount[i] = 0 # remove self
-
-proc findTop5(
-    taggedPostCount: var seq[uint8],
-    posts: seq[Post],
-    top5: var array[5, tuple[idx: int, count: uint8]],
-    related: var array[5, ptr Post]) =
-  for i, count in taggedPostCount:
-    if count > top5[4].count:
-      top5[4].idx = i
-      top5[4].count = count
-      for pos in countdown(3, 0):
-        if count > top5[pos].count:
-          swap(top5[pos+1], top5[pos])
-  for i in 0..<top5.len:
-    related[i] = addr posts[top5[i].idx]
-    top5[i].idx = 0
-    top5[i].count = 0
-
-proc process(
-    posts: seq[Post],
-    tagMap: Table[string, seq[int]],
-    relatedPosts: var seq[RelatedPosts]) =
-  var top5: array[5, tuple[idx: int, count: uint8]]
-  for i in 0..<posts.len:
-    var taggedPostCount = newSeq[uint8](posts.len)
-    taggedPostCount.countTaggedPost(posts, tagMap, i)
-    relatedPosts[i].`"_id"` = posts[i].`"_id"`
-    relatedPosts[i].tags = addr posts[i].tags
-    taggedPostCount.findTop5(posts, top5, relatedPosts[i].related)
-
-{.pop.}
+proc dumpHook(s: var string, p: Post) {.inline.} =
+  s.add fmt"""{{"_id":"{p.`"_id"`}","tags":"""
+  dumpHook(s, p.tags)
+  s.add ""","related":["""
+  for i, idx in p.top5:
+    let r = posts[idx.idx]
+    if i != 0:
+      s.add ","
+    s.add fmt"""{{"_id":"{r.`"_id"`}","title":"{r.title}","tags":"""
+    dumpHook(s, r.tags)
+    s.add '}'  
+  s.add """]}"""
 
 proc main() =
-  let
-    posts = input.readPosts
-    t0 = getMonotime()
-    tagMap = genTagMap(posts)
-  var relatedPosts = newSeq[RelatedPosts](posts.len)
-  posts.process(tagMap, relatedPosts)
+  let t0 = getMonotime()
+
+  var tagMap = initTable[string, seq[int]](100)
+  for i, post in posts:
+    for tag in post.tags:
+      tagMap.withValue(tag, val):
+        val[].add i
+      do:
+        tagMap[tag] = @[i]
+
+  for i, p in posts:
+    var taggedPostCount = newSeq[uint8](posts.len)
+
+    for tag in p.tags:
+      for relatedIDX in tagMap[tag]:
+        inc(taggedPostCount[relatedIDX])
+    taggedPostCount[i] = 0
+
+    for i, count in taggedPostCount:
+      if count > p.top5[4].cnt:
+        p.top5[4].idx = i
+        p.top5[4].cnt = count
+        for pos in countdown(3, 0):
+          if count > p.top5[pos].cnt:
+            p.top5[pos+1].idx = p.top5[pos].idx
+            p.top5[pos].idx = i
+            p.top5[pos+1].cnt = p.top5[pos].cnt
+            p.top5[pos].cnt = count
+
   let time = (getMonotime() - t0).inMicroseconds / 1000
-  output.writePosts(relatedPosts)
   echo "Processing time (w/o IO): ", time, "ms"
+  output.writeFile(posts.toJson)
 
 when isMainModule:
   main()
